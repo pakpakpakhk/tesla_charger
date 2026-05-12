@@ -68,6 +68,16 @@
             line-height: 1.6;
         }
 
+        .calibration-badge {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: #155724;
+        }
+
         .form-group {
             margin-bottom: 20px;
         }
@@ -286,21 +296,6 @@
             display: block;
         }
 
-        .calibration-note {
-            background: #e7f3ff;
-            border-left: 4px solid #2196F3;
-            padding: 10px 12px;
-            border-radius: 6px;
-            margin-top: 15px;
-            font-size: 12px;
-            color: #0d47a1;
-            display: none;
-        }
-
-        .calibration-note.show {
-            display: block;
-        }
-
         @media (max-width: 480px) {
             .container {
                 padding: 20px;
@@ -320,13 +315,15 @@
     <div class="container">
         <div class="header">
             <h1>⚡ Tesla Charger</h1>
-            <p>Charging Calculator (Calibrated)</p>
+            <p>Charging Calculator</p>
         </div>
 
         <div class="car-info">
             <strong>🚗 Model Y Juniper RWD</strong><br>
-            Battery: 61 kWh | Charger: 220V, 32A Max<br>
-            <span style="font-size: 11px; color: #888;">Calibrated from real-world testing</span>
+            Charger: 220V, 32A Max
+            <div class="calibration-badge">
+                ✓ Calibrated: 10A × 7h 38m = 14 kWh (55% → 78%)
+            </div>
         </div>
 
         <div id="calculatorForm">
@@ -351,11 +348,11 @@
                 <div class="battery-inputs">
                     <div class="battery-input-wrapper">
                         <label style="font-size: 11px; font-weight: 500;">Current %</label>
-                        <input type="number" id="currentBattery" min="0" max="100" step="1" placeholder="e.g., 20" required>
+                        <input type="number" id="currentBattery" min="0" max="100" step="1" placeholder="e.g., 55" required>
                     </div>
                     <div class="battery-input-wrapper">
                         <label style="font-size: 11px; font-weight: 500;">Target %</label>
-                        <input type="number" id="targetBattery" min="0" max="100" step="1" placeholder="e.g., 80" required>
+                        <input type="number" id="targetBattery" min="0" max="100" step="1" placeholder="e.g., 78" required>
                     </div>
                 </div>
             </div>
@@ -375,7 +372,7 @@
                 <div>
                     <span class="amperage-value" id="amperage">0</span><span class="amperage-unit">A</span>
                 </div>
-                <div class="amperage-label">Amperage</div>
+                <div class="amperage-label">Amperage (Integer)</div>
             </div>
 
             <div class="result-details">
@@ -388,7 +385,7 @@
                     <span class="result-value" id="energy">-</span>
                 </div>
                 <div class="result-row">
-                    <span class="result-label">Power Output</span>
+                    <span class="result-label">Power Output @ Recommended A</span>
                     <span class="result-value" id="power">-</span>
                 </div>
                 <div class="result-row">
@@ -399,15 +396,16 @@
 
             <div id="warningMessage" class="warning"></div>
             <div id="errorMessage" class="error"></div>
-            <div id="calibrationNote" class="calibration-note"></div>
         </div>
     </div>
 
     <script>
-        const BATTERY_CAPACITY = 61; // kWh usable (calibrated from real testing)
+        // Calibration from real test: 10A × 7h 38m = 14 kWh for 23% charge
+        // This means: 14 kWh / 23% = 0.6087 kWh per 1%
+        const KWH_PER_PERCENT = 0.6087; // kWh per 1% battery
         const WALL_VOLTAGE = 220; // Volts
         const MAX_AMPERAGE = 32; // Amps
-        const CHARGING_EFFICIENCY = 0.96; // 96% efficiency (calibrated from real testing)
+        const CHARGING_EFFICIENCY = 0.96; // 96% system efficiency
 
         function getCurrentTime() {
             const now = new Date();
@@ -476,26 +474,29 @@
                 return;
             }
 
-            // Calculate energy needed
+            // Calculate energy needed (based on calibrated ratio)
             const batteryPercentageToCharge = targetBattery - currentBattery;
-            const energyNeeded = (BATTERY_CAPACITY * batteryPercentageToCharge) / 100;
+            const energyNeeded = batteryPercentageToCharge * KWH_PER_PERCENT;
 
-            // Calculate required power (accounting for efficiency)
-            const requiredPowerKW = (energyNeeded / chargingHours) / CHARGING_EFFICIENCY;
+            // Calculate required power
+            const requiredPowerKW = energyNeeded / chargingHours;
             const requiredPowerW = requiredPowerKW * 1000;
 
-            // Calculate required amperage
-            const requiredAmperage = requiredPowerW / WALL_VOLTAGE;
+            // Calculate required amperage (accounting for efficiency losses)
+            const requiredAmperage = (requiredPowerW / WALL_VOLTAGE) / CHARGING_EFFICIENCY;
 
-            // Round to nearest 0.5A
-            const roundedAmperage = Math.round(requiredAmperage * 2) / 2;
+            // Round UP to next integer (ceiling)
+            const roundedAmperage = Math.ceil(requiredAmperage);
+
+            // Calculate actual power output with rounded amperage
+            const actualPowerKW = (roundedAmperage * WALL_VOLTAGE * CHARGING_EFFICIENCY) / 1000;
 
             // Display results
             displayResults(
                 roundedAmperage,
                 chargingHours,
                 energyNeeded,
-                requiredPowerKW
+                actualPowerKW
             );
 
             // Check warnings
@@ -511,8 +512,6 @@
             document.getElementById('warningMessage').classList.remove('show');
             document.getElementById('errorMessage').textContent = '';
             document.getElementById('errorMessage').classList.remove('show');
-            document.getElementById('calibrationNote').textContent = '';
-            document.getElementById('calibrationNote').classList.remove('show');
 
             // Format duration
             const wholeHours = Math.floor(hours);
@@ -522,7 +521,7 @@
                 : `${minutes}m`;
 
             // Update display
-            document.getElementById('amperage').textContent = amperage.toFixed(1);
+            document.getElementById('amperage').textContent = amperage;
             document.getElementById('duration').textContent = durationStr;
             document.getElementById('energy').textContent = energy.toFixed(2) + ' kWh';
             document.getElementById('power').textContent = power.toFixed(2) + ' kW';
@@ -530,10 +529,9 @@
 
         function checkWarnings(amperage, hours, percentageToCharge) {
             const warningEl = document.getElementById('warningMessage');
-            const calibrationNoteEl = document.getElementById('calibrationNote');
 
             if (amperage > MAX_AMPERAGE) {
-                warningEl.textContent = `⚠️ Required amperage (${amperage.toFixed(1)}A) exceeds max charger capacity (${MAX_AMPERAGE}A). Consider extending charging time or reducing target percentage.`;
+                warningEl.textContent = `⚠️ Required amperage (${amperage}A) exceeds max charger capacity (${MAX_AMPERAGE}A). Consider extending charging time or reducing target percentage.`;
                 warningEl.classList.add('show');
             } else if (hours < 1) {
                 warningEl.textContent = `⚠️ Charging time is very short (${(hours * 60).toFixed(0)} minutes). This may stress the battery.`;
@@ -542,10 +540,6 @@
                 warningEl.textContent = `✓ Charging a significant percentage (${percentageToCharge}%). Normal operation.`;
                 warningEl.classList.add('show');
             }
-
-            // Show calibration note for comparison
-            calibrationNoteEl.textContent = `ℹ️ App calibrated: 61 kWh capacity, 96% efficiency (from real-world test: 10A × 6h38m = 14 kWh at 55%→78%)`;
-            calibrationNoteEl.classList.add('show');
         }
 
         function showError(message) {
