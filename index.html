@@ -286,10 +286,19 @@
             display: block;
         }
 
-        .info-icon {
-            font-size: 11px;
-            color: #999;
-            margin-top: 8px;
+        .calibration-note {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 10px 12px;
+            border-radius: 6px;
+            margin-top: 15px;
+            font-size: 12px;
+            color: #0d47a1;
+            display: none;
+        }
+
+        .calibration-note.show {
+            display: block;
         }
 
         @media (max-width: 480px) {
@@ -311,15 +320,16 @@
     <div class="container">
         <div class="header">
             <h1>⚡ Tesla Charger</h1>
-            <p>Charging Calculator</p>
+            <p>Charging Calculator (Calibrated)</p>
         </div>
 
         <div class="car-info">
             <strong>🚗 Model Y Juniper RWD</strong><br>
-            Battery: 62 kWh | Charger: 220V, 32A Max
+            Battery: 61 kWh | Charger: 220V, 32A Max<br>
+            <span style="font-size: 11px; color: #888;">Calibrated from real-world testing</span>
         </div>
 
-        <form id="calculatorForm">
+        <div id="calculatorForm">
             <!-- Time Inputs -->
             <div class="form-group">
                 <label>⏰ Charging Time</label>
@@ -352,10 +362,10 @@
 
             <!-- Buttons -->
             <div class="button-group">
-                <button type="button" class="btn-calculate" onclick="calculateAmperage()">Calculate</button>
-                <button type="reset" class="btn-reset">Reset</button>
+                <button type="button" class="btn-calculate" id="calculateBtn">Calculate</button>
+                <button type="button" class="btn-reset" id="resetBtn">Reset</button>
             </div>
-        </form>
+        </div>
 
         <!-- Result -->
         <div id="resultContainer" class="result">
@@ -389,14 +399,15 @@
 
             <div id="warningMessage" class="warning"></div>
             <div id="errorMessage" class="error"></div>
+            <div id="calibrationNote" class="calibration-note"></div>
         </div>
     </div>
 
     <script>
-        const BATTERY_CAPACITY = 62; // kWh usable
+        const BATTERY_CAPACITY = 61; // kWh usable (calibrated from real testing)
         const WALL_VOLTAGE = 220; // Volts
         const MAX_AMPERAGE = 32; // Amps
-        const CHARGING_EFFICIENCY = 0.95; // 95% efficiency
+        const CHARGING_EFFICIENCY = 0.96; // 96% efficiency (calibrated from real testing)
 
         function getCurrentTime() {
             const now = new Date();
@@ -415,6 +426,9 @@
         window.addEventListener('DOMContentLoaded', function() {
             document.getElementById('startTime').value = getCurrentTime();
             document.getElementById('endTime').value = getDefaultEndTime();
+            
+            document.getElementById('calculateBtn').addEventListener('click', calculateAmperage);
+            document.getElementById('resetBtn').addEventListener('click', resetForm);
         });
 
         function calculateAmperage() {
@@ -425,8 +439,13 @@
             const targetBattery = parseFloat(document.getElementById('targetBattery').value);
 
             // Validation
-            if (!startTime || !endTime || isNaN(currentBattery) || isNaN(targetBattery)) {
-                showError('Please fill in all fields');
+            if (!startTime || !endTime) {
+                showError('Please set start and end times');
+                return;
+            }
+
+            if (isNaN(currentBattery) || isNaN(targetBattery)) {
+                showError('Please enter battery percentages');
                 return;
             }
 
@@ -441,16 +460,16 @@
             }
 
             // Calculate charging time in hours
-            const start = new Date(`2000-01-01 ${startTime}`);
-            const end = new Date(`2000-01-01 ${endTime}`);
+            const [startHour, startMin] = startTime.split(':').map(Number);
+            const [endHour, endMin] = endTime.split(':').map(Number);
             
-            // Handle case where end time is next day
-            if (end <= start) {
-                end.setDate(end.getDate() + 1);
+            let chargingMinutes = (endHour * 60 + endMin) - (startHour * 60 + startMin);
+            
+            if (chargingMinutes <= 0) {
+                chargingMinutes += 24 * 60; // Add 24 hours if end is next day
             }
 
-            const chargingTimeMs = end - start;
-            const chargingHours = chargingTimeMs / (1000 * 60 * 60);
+            const chargingHours = chargingMinutes / 60;
 
             if (chargingHours <= 0) {
                 showError('End time must be after start time');
@@ -492,6 +511,8 @@
             document.getElementById('warningMessage').classList.remove('show');
             document.getElementById('errorMessage').textContent = '';
             document.getElementById('errorMessage').classList.remove('show');
+            document.getElementById('calibrationNote').textContent = '';
+            document.getElementById('calibrationNote').classList.remove('show');
 
             // Format duration
             const wholeHours = Math.floor(hours);
@@ -509,6 +530,7 @@
 
         function checkWarnings(amperage, hours, percentageToCharge) {
             const warningEl = document.getElementById('warningMessage');
+            const calibrationNoteEl = document.getElementById('calibrationNote');
 
             if (amperage > MAX_AMPERAGE) {
                 warningEl.textContent = `⚠️ Required amperage (${amperage.toFixed(1)}A) exceeds max charger capacity (${MAX_AMPERAGE}A). Consider extending charging time or reducing target percentage.`;
@@ -516,10 +538,14 @@
             } else if (hours < 1) {
                 warningEl.textContent = `⚠️ Charging time is very short (${(hours * 60).toFixed(0)} minutes). This may stress the battery.`;
                 warningEl.classList.add('show');
-            } else if (percentageToCharge > 80) {
-                warningEl.textContent = `✓ Charging a large percentage (${percentageToCharge}%). Monitor temperature.`;
+            } else if (percentageToCharge > 60) {
+                warningEl.textContent = `✓ Charging a significant percentage (${percentageToCharge}%). Normal operation.`;
                 warningEl.classList.add('show');
             }
+
+            // Show calibration note for comparison
+            calibrationNoteEl.textContent = `ℹ️ App calibrated: 61 kWh capacity, 96% efficiency (from real-world test: 10A × 6h38m = 14 kWh at 55%→78%)`;
+            calibrationNoteEl.classList.add('show');
         }
 
         function showError(message) {
@@ -529,12 +555,15 @@
             document.getElementById('resultContainer').classList.remove('show');
         }
 
-        // Reset form on reset button click
-        document.getElementById('calculatorForm').addEventListener('reset', function() {
+        function resetForm() {
+            document.getElementById('startTime').value = getCurrentTime();
+            document.getElementById('endTime').value = getDefaultEndTime();
+            document.getElementById('currentBattery').value = '';
+            document.getElementById('targetBattery').value = '';
             document.getElementById('resultContainer').classList.remove('show');
             document.getElementById('warningMessage').classList.remove('show');
             document.getElementById('errorMessage').classList.remove('show');
-        });
+        }
     </script>
 </body>
 </html>
